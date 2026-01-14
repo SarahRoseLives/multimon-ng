@@ -153,6 +153,7 @@ static int rtl_ppm = 0;
 static short rtl_audio_buffer[16384];
 static float rtl_float_buffer[16384];
 static volatile int rtl_running = 0;
+static unsigned int rtl_overlap = 0;
 #endif
 
 extern bool fms_justhex;
@@ -276,10 +277,18 @@ void rtl_process_callback(int16_t *buffer, int length)
         rtl_fbuf_cnt++;
     }
     
-    /* Process when we have enough samples (at least 1024) */
-    if (rtl_fbuf_cnt >= 1024) {
-        process_buffer(rtl_float_buffer, rtl_audio_buffer, rtl_fbuf_cnt);
-        rtl_fbuf_cnt = 0;
+    /* Process when we have enough samples, preserving overlap */
+    if (rtl_fbuf_cnt > rtl_overlap + 512) {
+        process_buffer(rtl_float_buffer, rtl_audio_buffer, rtl_fbuf_cnt - rtl_overlap);
+        
+        /* Preserve overlap samples at beginning of buffer */
+        if (rtl_overlap > 0) {
+            memmove(rtl_audio_buffer, rtl_audio_buffer + rtl_fbuf_cnt - rtl_overlap, 
+                    rtl_overlap * sizeof(rtl_audio_buffer[0]));
+            memmove(rtl_float_buffer, rtl_float_buffer + rtl_fbuf_cnt - rtl_overlap, 
+                    rtl_overlap * sizeof(rtl_float_buffer[0]));
+        }
+        rtl_fbuf_cnt = rtl_overlap;
     }
 }
 #endif
@@ -1027,6 +1036,10 @@ intypefound:
         fprintf(stderr, "Using RTL-SDR input\n");
         fprintf(stderr, "Frequency: %u Hz\n", rtl_frequency);
         fprintf(stderr, "Sample rate: %u Hz\n", rtl_sample_rate);
+        fprintf(stderr, "Overlap: %u samples\n", overlap);
+        
+        rtl_overlap = overlap;
+        rtl_fbuf_cnt = overlap;
         
         if (rtl_init(rtl_dev, rtl_frequency, rtl_sample_rate, rtl_gain, rtl_ppm, rtl_process_callback) < 0) {
             fprintf(stderr, "Failed to initialize RTL-SDR\n");
