@@ -35,6 +35,16 @@ elseif( UNIX )
 		mark_as_advanced( PULSE_AUDIO_SUPPORT )
 	endif( PULSEAUDIO_FOUND )
 
+	# Check for RTL-SDR support
+	find_package( PkgConfig )
+	if ( PKG_CONFIG_FOUND )
+		pkg_check_modules( LIBRTLSDR librtlsdr )
+		if ( LIBRTLSDR_FOUND )
+			option( RTL_SDR_SUPPORT "Enable RTL-SDR support" ${LIBRTLSDR_FOUND} )
+			mark_as_advanced( RTL_SDR_SUPPORT )
+		endif( LIBRTLSDR_FOUND )
+	endif( PKG_CONFIG_FOUND )
+
 	# Check if we can use the GCC/llvm __builtin_popcount
 	include( CheckCSourceCompiles )
 	check_c_source_compiles(
@@ -63,6 +73,18 @@ if( PULSE_AUDIO_SUPPORT )
 else( PULSE_AUDIO_SUPPORT )
 	add_definitions( "-DDUMMY_AUDIO" )
 endif( PULSE_AUDIO_SUPPORT )
+
+if( RTL_SDR_SUPPORT )
+	include_directories( ${LIBRTLSDR_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/../rtl-sdr/include )
+	link_libraries( ${LIBRTLSDR_LIBRARIES} pthread )
+	link_directories( ${LIBRTLSDR_LIBRARY_DIRS} ${CMAKE_SOURCE_DIR}/../rtl-sdr/build/src )
+	add_definitions( "-DRTL_SDR" )
+	set( SOURCES ${SOURCES} rtl_input.c )
+	set( HEADERS ${HEADERS} rtl_input.h )
+	message(STATUS "RTL-SDR support enabled")
+else( RTL_SDR_SUPPORT )
+	message(STATUS "RTL-SDR support disabled")
+endif( RTL_SDR_SUPPORT )
 
 if( NOT MSVC )
 	add_definitions( "-std=gnu11" )

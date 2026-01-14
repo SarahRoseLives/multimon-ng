@@ -44,6 +44,10 @@
 #include <time.h>
 #include <getopt.h>
 
+#ifdef RTL_SDR
+#include "rtl_input.h"
+#endif
+
 /* MinGW compatibility for timespec_get */
 #if defined(__MINGW32__) || defined(__MINGW64__)
 #include <windows.h>
@@ -138,6 +142,18 @@ static int timestamp = 0;
 static int iso8601 = 0;
 static char *label = NULL;
 int json_mode = 0;
+
+#ifdef RTL_SDR
+static int use_rtl_sdr = 0;
+static char *rtl_dev = NULL;
+static uint32_t rtl_frequency = 0;
+static uint32_t rtl_sample_rate = 22050;
+static int rtl_gain = -100;
+static int rtl_ppm = 0;
+static short rtl_audio_buffer[16384];
+static float rtl_float_buffer[16384];
+static volatile int rtl_running = 0;
+#endif
 
 extern bool fms_justhex;
 
@@ -244,6 +260,29 @@ void process_buffer(float *float_buf, short *short_buf, unsigned int len)
             dem[i]->demod(dem_st+i, buffer, len);
         }
 }
+
+#ifdef RTL_SDR
+static unsigned int rtl_fbuf_cnt = 0;
+
+void rtl_process_callback(int16_t *buffer, int length)
+{
+    int i;
+    if (!rtl_running) return;
+    
+    /* Accumulate samples in buffer */
+    for (i = 0; i < length && rtl_fbuf_cnt < 16384; i++) {
+        rtl_audio_buffer[rtl_fbuf_cnt] = buffer[i];
+        rtl_float_buffer[rtl_fbuf_cnt] = buffer[i] * (1.0f/32768.0f);
+        rtl_fbuf_cnt++;
+    }
+    
+    /* Process when we have enough samples (at least 1024) */
+    if (rtl_fbuf_cnt >= 1024) {
+        process_buffer(rtl_float_buffer, rtl_audio_buffer, rtl_fbuf_cnt);
+        rtl_fbuf_cnt = 0;
+    }
+}
+#endif
 
 /* ---------------------------------------------------------------------- */
 #ifdef SUN_AUDIO
@@ -640,6 +679,9 @@ static void input_file(unsigned int sample_rate, unsigned int overlap,
 void quit(void)
 {
     int i = 0;
+#ifdef RTL_SDR
+    rtl_running = 0;
+#endif
     for (i = 0; (unsigned int) i < NUMDEMOD; i++)
     {
         if(MASK_ISSET(i))
@@ -687,6 +729,15 @@ static const char usage_str[] = "\n"
         "  --flex-no-ts : FLEX: Do not add a timestamp to the FLEX demodulator output\n"
         "  --json       : Format output as JSON. Supported by the following demodulators:\n"
         "                 DTMF, EAS, FLEX, POCSAG. (Other demodulators will silently ignore this flag.)\n"
+#ifdef RTL_SDR
+        "\n"
+        "RTL-SDR Options:\n"
+        "  --rtl-dev <n>     : RTL-SDR device index or serial (default: 0)\n"
+        "  --rtl-freq <freq> : RTL-SDR frequency to tune to in Hz (required for RTL-SDR)\n"
+        "  --rtl-gain <gain> : RTL-SDR tuner gain in dB (default: auto)\n"
+        "  --rtl-samp <rate> : RTL-SDR sample rate in Hz (default: 22050)\n"
+        "  --rtl-ppm <ppm>   : RTL-SDR frequency correction in ppm (default: 0)\n"
+#endif
         "\n"
         "   Raw input requires one channel, 16 bit, signed integer (platform-native)\n"
         "   samples at the demodulator's input sampling rate, which is\n"
@@ -712,6 +763,13 @@ int main(int argc, char *argv[])
         {"label", required_argument, NULL, 'l'},
         {"charset", required_argument, NULL, 'C'},
         {"json", no_argument, &json_mode, 1},
+#ifdef RTL_SDR
+        {"rtl-dev", required_argument, NULL, 1000},
+        {"rtl-freq", required_argument, NULL, 1001},
+        {"rtl-gain", required_argument, NULL, 1002},
+        {"rtl-samp", required_argument, NULL, 1003},
+        {"rtl-ppm", required_argument, NULL, 1004},
+#endif
         {0, 0, 0, 0}
       };
 
@@ -889,6 +947,26 @@ intypefound:
 	case 'l':
 	    label = optarg;
 	    break;
+
+#ifdef RTL_SDR
+        case 1000:
+            rtl_dev = optarg;
+            use_rtl_sdr = 1;
+            break;
+        case 1001:
+            rtl_frequency = (uint32_t)atol(optarg);
+            use_rtl_sdr = 1;
+            break;
+        case 1002:
+            rtl_gain = atoi(optarg) * 10;
+            break;
+        case 1003:
+            rtl_sample_rate = (uint32_t)atol(optarg);
+            break;
+        case 1004:
+            rtl_ppm = atoi(optarg);
+            break;
+#endif
         }
     }
 
@@ -938,6 +1016,42 @@ intypefound:
         }
     if (!quietflg && !json_mode)
         fprintf(stdout, "\n");
+    
+#ifdef RTL_SDR
+    if (use_rtl_sdr) {
+        if (rtl_frequency == 0) {
+            fprintf(stderr, "Error: RTL-SDR frequency not specified. Use --rtl-freq <frequency>\n");
+            exit(2);
+        }
+        
+        fprintf(stderr, "Using RTL-SDR input\n");
+        fprintf(stderr, "Frequency: %u Hz\n", rtl_frequency);
+        fprintf(stderr, "Sample rate: %u Hz\n", rtl_sample_rate);
+        
+        if (rtl_init(rtl_dev, rtl_frequency, rtl_sample_rate, rtl_gain, rtl_ppm, rtl_process_callback) < 0) {
+            fprintf(stderr, "Failed to initialize RTL-SDR\n");
+            exit(5);
+        }
+        
+        rtl_running = 1;
+        
+        if (rtl_start() < 0) {
+            fprintf(stderr, "Failed to start RTL-SDR threads\n");
+            rtl_stop();
+            exit(5);
+        }
+        
+        fprintf(stderr, "RTL-SDR running, press Ctrl-C to stop...\n");
+        
+        while (rtl_running) {
+            sleep(1);
+        }
+        
+        rtl_stop();
+        quit();
+        exit(0);
+    }
+#endif
     
     if (optind < argc && !strcmp(argv[optind], "-"))
     {

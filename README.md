@@ -1,4 +1,6 @@
-# multimon-ng
+# multimon-ng (RTL-SDR Fork)
+
+This is a fork of multimon-ng with integrated RTL-SDR support, allowing direct reception from RTL-SDR dongles without needing to pipe from rtl_fm.
 
 multimon-ng is the successor of multimon. It decodes the following digital transmission modes:
 
@@ -38,6 +40,40 @@ sudo make install
 
 The installation prefix can be set by passing a 'PREFIX' parameter to qmake. e.g:
 ```qmake multimon-ng.pro PREFIX=/usr/local```
+
+### Building with RTL-SDR Support
+
+RTL-SDR support is automatically enabled if librtlsdr is detected during the CMake build:
+
+```
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
+
+If librtlsdr is not found, multimon-ng will still build but without RTL-SDR support. To install librtlsdr:
+
+**Debian/Ubuntu:**
+```
+sudo apt-get install librtlsdr-dev
+```
+
+**Arch Linux:**
+```
+sudo pacman -S rtl-sdr
+```
+
+**From source:**
+```
+git clone https://github.com/osmocom/rtl-sdr.git
+cd rtl-sdr
+mkdir build && cd build
+cmake ..
+make
+sudo make install
+```
 
 ### Windows MinGW Builds
 
@@ -103,6 +139,39 @@ You can also "pipe" raw samples into multimon-ng using something like:
 As a last example, here is how you can use it in combination with RTL-SDR:
 
     rtl_fm -f 403600000 -s 22050 | multimon-ng -t raw -a FMSFSK -a AFSK1200 /dev/stdin
+
+### Direct RTL-SDR Input (This Fork)
+
+This fork includes integrated RTL-SDR support, eliminating the need to pipe from rtl_fm:
+
+**APRS on 144.390 MHz:**
+```
+multimon-ng -a AFSK1200 --rtl-freq 144390000 --rtl-gain 42
+```
+
+**POCSAG pager on 403.6 MHz:**
+```
+multimon-ng -a POCSAG512 -a POCSAG1200 -a POCSAG2400 --rtl-freq 403600000 --rtl-gain 40
+```
+
+**With custom sample rate:**
+```
+multimon-ng -a AFSK1200 --rtl-freq 144390000 --rtl-samp 24000 --rtl-gain 42
+```
+
+#### RTL-SDR Command-Line Options
+
+- `--rtl-dev <n>` : RTL-SDR device index or serial (default: 0)
+- `--rtl-freq <freq>` : Frequency to tune to in Hz (required for RTL-SDR mode)
+- `--rtl-gain <gain>` : Tuner gain in dB (default: auto gain)
+- `--rtl-samp <rate>` : Sample rate in Hz (default: 22050)
+- `--rtl-ppm <ppm>` : Frequency correction in ppm (default: 0)
+
+The RTL-SDR integration automatically handles:
+- FM demodulation with proper oversampling (~1 MHz capture rate)
+- Frequency offset tuning to avoid DC spike
+- Downsampling to the target audio rate (default 22050 Hz)
+- DC blocking filter
 
 ### Flac record and parse live data
 
