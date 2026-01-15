@@ -209,9 +209,12 @@ static void *demod_thread_fn(void *arg)
         safe_cond_wait(&d->ready, &d->ready_m);
         
         pthread_rwlock_wrlock(&d->rw);
+        
+        /* Use simple low_pass - this matches rtl_fm default behavior */
         low_pass(d);
         fm_demod(d);
         dc_block_filter(d);
+        
         pthread_rwlock_unlock(&d->rw);
 
         if (d->exit_flag) {
@@ -282,12 +285,13 @@ int rtl_init(const char *device, uint32_t frequency, uint32_t sample_rate, int g
     dongle.gain = gain;
     dongle.ppm_error = ppm_error;
     dongle.buf_len = DEFAULT_BUF_LENGTH;
-    dongle.offset_tuning = 0;
+    dongle.offset_tuning = 0;  /* Test: try without offset tuning flag */
     dongle.direct_sampling = 0;
 
     demod_rtl.rate_in = capture_rate;
     demod_rtl.rate_out = sample_rate;
     demod_rtl.downsample = downsample;
+    
     demod_rtl.prev_index = 0;
     demod_rtl.now_r = 0;
     demod_rtl.now_j = 0;
